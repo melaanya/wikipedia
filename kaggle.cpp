@@ -291,14 +291,9 @@ void read_test_file(ifstream &fin)
 			++i;
 		}
 		testdocs[k] = newdoc;
-		k++;
-		//cout << k << endl;
-		if (k > NUM_OF_TEST_DOCS - 1)
-			break;						//TODO
+		k++;			
 		percent(lastProcent, (double)k / NUM_OF_TEST_DOCS, t0, flagAlreadyPrintTime);
 	}
-	cout << testdocs[NUM_OF_TEST_DOCS - 1].numofthedoc;
-	//testdocs.pop_back();
 }
 
 
@@ -347,7 +342,7 @@ bool compPairGreaterIntIntSecond (pair <int, int> a, pair <int, int> b)
 
 
 // предсказание для конкурса
-void kaggle_knn_entropy(ofstream &fout, int chosendocs, /*int chosencategs, */ double entropyBarrier)
+void kaggle_entropy(ofstream &fout, int chosendocs, /*int chosencategs, */ double entropyBarrier)
 {
 	double sumPrec = 0;
 	double lastProcent = 0;
@@ -639,9 +634,9 @@ void kaggleEntrBestR(ifstream & finBestR, ofstream & fout, ofstream &foutMistake
 	for (int i = 0; i < NUM_OF_CATEGS; ++i)
 	{
 		finBestR >> tempNum >> r[tempNum];
-		if (r[tempNum] > 0)  // нововведение 1
-			r[tempNum] = ceil((double)r[tempNum] * NUM_OF_TEST_DOCS / NUM_OF_DOCS); // масштабирование границ
-		r[24177] = 0;
+	/*	if (r[tempNum] > 0)  
+			r[tempNum] = ceil((double)r[tempNum] * NUM_OF_TEST_DOCS / NUM_OF_DOCS); // масштабирование границ - нововведение 1*/
+		//r[24177] = 0;
 	}
 	cout << "r[1] = " << r[1] << endl;
 	cout << "r[159007] = " << r[159007] << endl;
@@ -699,9 +694,24 @@ int main()
 	{
 		categs[i].numofthecategory = -1000000000;
 	}
-
+	ifstream finBestR;
+	finBestR.open("bestRforcategsValid.txt");
+	
 	//read_all_docs(fin);	
 	//read_all_docs_without_catterms(fin);
+	
+	// for comparing numofdocs in trainfile and predicted
+	/*vector <int> r(NUM_OF_CATEGS);
+	int tempNum;
+	
+	ofstream foutCategDocs;
+	foutCategDocs.open("categ-numofdocs2.txt");
+	for (int i = 0; i < NUM_OF_CATEGS; ++i)
+	{
+		finBestR >> tempNum >> r[tempNum];
+		foutCategDocs << tempNum << " " << categs[tempNum].numofdocs << " " << r[tempNum] << endl;
+	}*/
+	
 	cout << "finish processing train file" << endl;
 	
 	FILE * finEntr;
@@ -721,26 +731,18 @@ int main()
 		terms[k] = df;
 	}
 
+	ofstream foutMistakes;
+	foutMistakes.open("mistakes3011.txt");
 	//read_test_file(fintest);
 	
-/*	for (int i = 0; i < categories[24177].size(); ++i)
-	{
-		cout << categories[24177]
-	}*/
 
 	cout << "success" << endl;
-	
-	ifstream finBestR;
-	finBestR.open("bestRforcategs.txt");
 
 	// вывод информации о документах в файл
 	ofstream fout;
-	fout.open("KaggleEntr301115-1(except24177).csv");
+	fout.open("KaggleEntr071215-1.csv");
 	fout << "Id,Predicted"<< endl;
 	
-	
-	ofstream foutMistakes;
-	foutMistakes.open("mistakes3011.txt");
 	/*int doc = 452167;	
 	int j = 0;
 	while (j < NUM_OF_PAIRS_TEST && totalEntropiaTest[j].doc != doc)
