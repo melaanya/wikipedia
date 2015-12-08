@@ -28,7 +28,9 @@ const int REAL_NUM_OF_CATEGS = 325056;
 const int NUM_OF_TERMS = 2085167;  // если считать terms, которых вообще нет, удобная константа для индексации
 const int REAL_NUM_OF_TERMS = 1617899;
 const int NUM_OF_PAIRS = 179682414;    // в прошлой версии почему-то был на 1 меньше??
+const int NUM_OF_PAIRS_VALID = 34329785;
 const int NUM_OF_EXPERIMENTS = 1;
+const int NUM_OF_TEST_DOCS = 452168; 
 const double EPS = 0.00001;
 class Category
 {
@@ -163,6 +165,7 @@ double Document::getSimilarityKnn(Document & d)
 
 
 valarray <EntropiaPair> totalEntropia(NUM_OF_PAIRS);
+valarray <EntropiaPair> validTotalEntropia(NUM_OF_PAIRS_VALID);
 valarray <Frequency> totalFrequency(REAL_NUM_OF_TERMS);
 vector <Document> docs(NUM_OF_DOCS + 1);
 vector <Category> categs(NUM_OF_CATEGS);
@@ -249,21 +252,14 @@ void read_all_docs_without_catterms(ifstream & fin)
 	}
 	docs.pop_back();  //удаляю последний, т.к. он некорректно считывается
 	
-	int totalCategs = 0;
+/*	int totalCategs = 0;
 	for (int i = 0; i < categs.size(); ++i)
 		if (categs[i].numofthecategory > 0)
 			++totalCategs;
-	ROBOT_ASSERT(totalCategs == REAL_NUM_OF_CATEGS);
+	ROBOT_ASSERT(totalCategs == REAL_NUM_OF_CATEGS);*/
 	cout << "categs are read, checked" << endl;
 }
-
-void sort(valarray <EntropiaPair>& x, valarray<int>& ind)
-{
-    int n = x.size();
-    vector <pair<int, EntropiaPair> > order(n);
-    for (int i = 0; i < n; i++) 
-		order[i] = make_pair(i, x[i]);
-    struct ordering 
+ struct orderingByCateg 
 	{
         bool operator ()(pair <int, EntropiaPair> const& a, pair<int, EntropiaPair>  const& b) 
 		{
@@ -284,7 +280,24 @@ void sort(valarray <EntropiaPair>& x, valarray<int>& ind)
 			 return (a.second.doc < b.second.doc) || (a.second.doc == b.second.doc && a.second.entropia > b.second.entropia);
 		}
 	};
-     sort(order.begin(), order.end(), ordering());
+	
+enum SortType { CATEG_ENTR, ENTR, DOC_ENTR };
+void sort(valarray <EntropiaPair>& x, valarray<int>& ind, SortType T)
+{
+    int n = x.size();
+    vector <pair<int, EntropiaPair> > order(n);
+    for (int i = 0; i < n; i++) 
+		order[i] = make_pair(i, x[i]);
+	switch (T)
+	{
+		case CATEG_ENTR: sort(order.begin(), order.end(), orderingByCateg());
+						 break;
+		case ENTR: sort(order.begin(), order.end(), orderingByEntropy());
+						 break;
+		case DOC_ENTR: sort(order.begin(), order.end(), orderingByDoc());
+						 break;
+		default: ROBOT_ASSERT(false);
+	}
      ind.resize(n);
      for (int i = 0; i < n; i++) 
 		 ind[i] = order[i].first;
@@ -484,7 +497,7 @@ void processEntropyFile()
 	cout << "Ideal MaR = " << MaR << ", wrong MaR = " << MaRwrong << endl;
 }
 
-void bestRforCategs(/*ofstream & fout*/)  // sort - по категориям, а внутри по энтропии - название ordering
+/*void bestRforCategs()  // sort - по категориям, а внутри по энтропии - название ordering
 {
 	int j = 0;
 	double lastProcent = 0;
@@ -605,8 +618,135 @@ void bestRforCategs(/*ofstream & fout*/)  // sort - по категориям, а внутри по э
 		cout << "MaR = " << MaR << ", MaP = " << MaP<< ", commonMaF = " << MaF << endl;
 		++count;
 	}
-	/*for (int i = 0; i < NUM_OF_CATEGS; ++i)
-		fout << i << " " << r[i] << endl;*/
+	
+}*/
+
+void bestRforCategs(valarray <EntropiaPair> & totalEntropia, int numofcategsREAL, ofstream & foutR, ofstream &foutMistakes)  // sort - по категориям, а внутри по энтропии - название ordering
+{
+	foutMistakes << "невошедшие категории" << endl;
+	int j = 0;
+	double lastProcent = 0;
+	clock_t t0 = clock();
+	bool flagAlreadyPrintTime = false;
+	set <int> watchedCategs;
+	while (j < totalEntropia.size())
+	{
+		int categ = totalEntropia[j].categ;
+		int tp = 0, fp = 0;
+		int count = 0;
+		double maxMaf = 0;
+		r[categ] = 0;
+		truepos[categ] = 0;
+		falsepos[categ] = 0;
+		int maxcount, maxtp, maxfp;
+		ROBOT_ASSERT(watchedCategs.find(categ) == watchedCategs.end());
+		watchedCategs.insert(categ);
+		if (categs[categ].numofdocs == 0)
+			foutMistakes << categ << endl;
+		while (j < totalEntropia.size() && totalEntropia[j].categ == categ)
+		{
+				// есть в valid такие категории, которые не попали 
+			double curMaf = 0;
+			if (count > 0)
+				ROBOT_ASSERT(totalEntropia[j - 1].entropia >= totalEntropia[j].entropia);
+			int predDoc = totalEntropia[j].doc;
+			if (docs[predDoc].categories.find(categ) != docs[predDoc].categories.end())
+				tp++;
+			else
+				fp++;
+			++j;
+			++count;
+			if (tp != 0)
+			{
+				double curMaP = (double)tp / count;
+				double curMaR = (double)tp / categs[categ].numofdocs;  // должно быть все ок, т.к. пересчитала
+				curMaf = 2 * curMaP * curMaR / (curMaR + curMaP);
+			}
+			if (curMaf > maxMaf)
+			{
+				maxMaf = curMaf;
+				maxcount = count;
+				maxtp = tp;
+				maxfp = fp;
+			}
+		}
+		if (maxMaf != 0)
+		{
+			r[categ] = maxcount;
+			truepos[categ] = maxtp;
+			falsepos[categ] = maxfp;
+		}
+		if (j < totalEntropia.size())
+			ROBOT_ASSERT(categ < totalEntropia[j].categ)  
+		percent(lastProcent, (double)j / totalEntropia.size(), t0, flagAlreadyPrintTime);
+	}
+	
+	double MaP = 0, MaR = 0;
+	for (int i = 0; i < NUM_OF_CATEGS; ++i)
+	{
+		if (truepos[i] < 0 || categs[i].numofthecategory < 0)
+			continue;
+		if (r[i] != 0)
+			MaP += (double)truepos[i] / r[i];
+		MaR += (double)truepos[i] / categs[i].numofdocs;
+	}
+	MaP /= numofcategsREAL; // пересчитать реальное новое число категорий в 
+	MaR /= numofcategsREAL;
+/*MaP /= NUM_OF_CATEGS;
+	MaR /= NUM_OF_CATEGS;*/
+	double MaF = 2 * MaP * MaR / (MaP + MaR);
+	cout << "MaR = " << MaR << ", MaP = " << MaP<< ", commonMaF = " << MaF << endl;
+	int count = 0;
+	while (count < 7)   //достаточное число шагов, чтобы MaF перестал расти
+	{
+		int j = 0;
+		double lastProcent = 0;
+		clock_t t0 = clock();
+		bool flagAlreadyPrintTime = false;
+		while (j < totalEntropia.size())
+		{
+			int categ = totalEntropia[j].categ;
+			int tp = 0, fp = 0;
+			int count = 0;
+			while (j < totalEntropia.size() && totalEntropia[j].categ == categ)
+			{
+				double curMapOther = MaP - 1.0 / numofcategsREAL * truepos[categ] / r[categ];
+				double curMarOther = MaR - 1.0 / numofcategsREAL * truepos[categ] / categs[categ].numofdocs;
+				double curMaP = curMapOther;
+				double curMaR = curMarOther;
+				double curMaf = 0;
+				int predDoc = totalEntropia[j].doc;
+				if (docs[predDoc].categories.find(categ) != docs[predDoc].categories.end())
+					tp++;
+				else
+					fp++;
+				++j;
+				++count;
+				if (tp != 0)
+				{
+					curMaP = (double)tp / count / numofcategsREAL + curMapOther;
+					curMaR = (double)tp / categs[categ].numofdocs / numofcategsREAL + curMarOther;
+				}
+				curMaf = 2 * curMaP * curMaR / (curMaR + curMaP);
+				if (curMaf > MaF)
+				{
+					MaF = curMaf;
+					MaP = curMaP;
+					MaR = curMaR;
+					r[categ] = count;
+					truepos[categ] = tp;
+					falsepos[categ] = fp;
+				}
+			}
+			if (j < totalEntropia.size())
+				ROBOT_ASSERT(categ < totalEntropia[j].categ)
+			percent(lastProcent, (double)j / totalEntropia.size(), t0, flagAlreadyPrintTime);
+		}
+		cout << "MaR = " << MaR << ", MaP = " << MaP<< ", commonMaF = " << MaF << endl;
+		++count;
+	}
+	for (int i = 0; i < NUM_OF_CATEGS; ++i)
+		foutR << i << " " << r[i] << endl;
 	
 }
 
@@ -710,7 +850,6 @@ void knnBenchmark(ifstream & fin)
 			double idf = log2((double)NUM_OF_DOCS / terms[curFeat]); // вынести расчеты за цикл - при формировании terms[curFeat] проделывать
 			tfidf[k].first = tf * idf;
 			tfidf[k].second= curFeat;
-			//cout <<"res = " << tfidf[k].first << ", feat = " << tfidf[k].second << ", it->s = " << it->second << ", t[cF] = " <<  terms[curFeat] << ", sum = " << sum << ", tf = " << tf << ", idf = " << idf << endl;
 			++k;
 		}
 		sort(tfidf.begin(), tfidf.end(), compPairGreater);  // можно попробовать partial_sort первые 100-1000, например, и сравнить результаты
@@ -732,10 +871,6 @@ void knnBenchmark(ifstream & fin)
 		if (chosenTfidf.empty())
 			continue; // нет терминов, по которым искать - искать не будем
 		
-		/*cout << "best tf-idf terms" << endl;
-		for (int i = 0; i < chosenTfidf.size(); ++i)
-			cout << chosenTfidf[i].first << " " << chosenTfidf[i].second << endl;*/
-		
 		set <int> neighbourDocs;
 		for (int i = 0; i < chosenTfidf.size(); ++i)   // ввести еще 1 степень свободы: количество терминов, по которым должны пересекаться документы, чтобы быть соседями
 					// сейчас равно 1.
@@ -744,23 +879,10 @@ void knnBenchmark(ifstream & fin)
 			ROBOT_ASSERT(curFeat < NUM_OF_TERMS);
 			for (auto it = featDocs[curFeat].begin(); it != featDocs[curFeat].end(); ++it)
 			{
-				//ROBOT_ASSERT(docs[*it].terms.find(curFeat) != docs[*it].terms.end());
 				if (*it != doc)
 					neighbourDocs.insert(*it);
 			}
 		}
-		/*cout << "terms of cur doc" << endl;
-		for (auto it = docs[j].terms.begin(); it != docs[j].terms.end(); ++it)
-			cout << it->first << " ";
-		cout << "terms of neighb docs" << endl;
-		for (auto it2 = neighbourDocs.begin(); it2 != neighbourDocs.end(); ++it2)
-		{
-			cout << "doc: " << *it2 << ". ";
-			for (auto it = docs[*it2].terms.begin(); it != docs[*it2].terms.end(); ++it)
-				cout << it->first << " ";
-			cout << endl;
-		}*/
-			
 		vector <pair <double, int>> closestDocs(neighbourDocs.size());
 		k = 0;
 		int closeDocsChoose = min(globalcloseDocsChoose, (int)neighbourDocs.size());
@@ -773,17 +895,6 @@ void knnBenchmark(ifstream & fin)
 		}
 		partial_sort(closestDocs.begin(), closestDocs.begin() + closeDocsChoose, closestDocs.end(), compPairLess);
 		
-		/*cout << "terms of cur doc" << endl;
-		for (auto it = docs[j].terms.begin(); it != docs[j].terms.end(); ++it)
-			cout << it->first << " ";
-		cout << endl;
-		for (auto it2 = closestDocs.begin(); it2 != closestDocs.begin() + closeDocsChoose; ++it2)
-		{
-			cout << "doc: " << it2->second << ": " << "simil = " << it2->first << endl;
-			for (auto it = docs[it2->second].terms.begin(); it != docs[it2->second].terms.end(); ++it)
-				cout << it->first << " ";
-			cout << endl;
-		}*/
 		
 		if (closeDocsChoose > 1)
 			ROBOT_ASSERT(closestDocs[0].first <= closestDocs[1].first);
@@ -835,40 +946,6 @@ void knnBenchmark(ifstream & fin)
 			}
 			percent(lastProcent, (double)done / NUM_OF_DOCS / omp_get_num_threads(), t0, flagAlreadyPrintTime);
 		}
-		/*cout << "numofthedoc = " << j << endl;
-		cout << "\n predicted by knn: " << endl;
-		int countCommonKnn = 0, countCommonEntr = 0;
-		for (int i = 0; i < categsChoose; ++i)
-		{
-			cout << sortedCommCategs[i].first << " ";
-			if (docs[j].categories.find(sortedCommCategs[i].first) != docs[j].categories.end())
-				countCommonKnn++;
-		}
-		for (int i = categsChoose; i < sortedCommCategs.size(); ++i)
-				if (lastPredcategRep == sortedCommCategs[i].second)
-				{
-					cout << sortedCommCategs[i].first << " ";
-					if (docs[j].categories.find(sortedCommCategs[i].first) != docs[j].categories.end())
-						countCommonKnn++;	
-				}
-		cout << "\n predicted by entropia: " << endl;
-		k = 0;
-		while (k < NUM_OF_PAIRS && totalEntropia[k].doc != j)
-			++k;
-		cout << "numofthedoc from entr (check) = " << totalEntropia[k].doc << endl;
-		while (k < NUM_OF_PAIRS && totalEntropia[k].doc == j)
-		{
-			cout << totalEntropia[k].categ << " ";
-			if (docs[j].categories.find(totalEntropia[k].categ) != docs[j].categories.end())
-				countCommonEntr++;
-			++k;
-		}
-		ROBOT_ASSERT(totalEntropia[k].doc > j);
-		cout << "\n real categories: " << endl;
-		for (auto it = docs[j].categories.begin(); it != docs[j].categories.end(); ++it)
-			cout << *it << " ";
-		cout << "kNN = " << countCommonKnn << ", entr = " << countCommonEntr << endl;
-		//exit(-1); */ 
 	}
 	double MaR = 0, MaP = 0;
 	int countCategs = 0;
@@ -894,8 +971,6 @@ void knnBenchmark(ifstream & fin)
 			MaP += (double)tp / predictedDocs[i].size();  
 			MaR += (double)tp / categs[categ].numofdocs;
 		}
-		/*if (i % 10000)
-			cout << "MaR = " << MaR << ", MaP = " << MaP << endl;*/
 	}
 	
 	cout << "categs in set = " << countCategs << endl;
@@ -916,7 +991,7 @@ void readFileTotalEntropia(FILE * fin)
 {
 	fread(&totalEntropia[0], sizeof(EntropiaPair), NUM_OF_PAIRS, fin); // одной командой fread
 	valarray <int> ind(NUM_OF_PAIRS);
-	sort(totalEntropia, ind); 	// следить, какой сорт используетсЯ!			
+	sort(totalEntropia, ind, CATEG_ENTR); 	// следить, какой сорт используетсЯ!			
 	valarray <EntropiaPair> totalEntropiaSorted(NUM_OF_PAIRS);
 	for (int i = 0; i < totalEntropia.size(); ++i)
 		totalEntropiaSorted[i] = totalEntropia[ind[i]];
@@ -945,8 +1020,96 @@ void testParameters()
 }
 
 
-// алгоритм старый, но качество теперь удобно считать, т.к. есть информация
-// обо всех энтропиях
+void generateValidationDocs()   
+{
+	int count = 0;
+	set <int> generatedNumbers;
+	while (generatedNumbers.size() != NUM_OF_TEST_DOCS)
+		generatedNumbers.insert(rand () % NUM_OF_DOCS);
+	cout << "generated numbers succesfully" << endl;
+	
+	valarray <int> ind(NUM_OF_PAIRS);  // вектор для сортировки totalEntropia
+	sort(totalEntropia, ind, DOC_ENTR); // отсортировали его под документам
+	int j = 0;
+	while (j < NUM_OF_PAIRS)
+	{
+		int doc = totalEntropia[ind[j]].doc;
+		if (generatedNumbers.find(doc) == generatedNumbers.end())
+			while (j < NUM_OF_PAIRS && totalEntropia[ind[j]].doc == doc)
+				++j;
+		else
+			while (j < NUM_OF_PAIRS && totalEntropia[ind[j]].doc == doc)
+			{
+				validTotalEntropia[count++] = totalEntropia[ind[j]];
+				++j;
+			}
+	}
+	ROBOT_ASSERT(count == NUM_OF_PAIRS_VALID)
+	// сортировка по документам
+	valarray <int> ind2(NUM_OF_PAIRS_VALID);
+	sort(validTotalEntropia, ind2, DOC_ENTR);  	
+	valarray <EntropiaPair> validTotalEntropiaSorted(NUM_OF_PAIRS_VALID);
+	for (int i = 0; i < NUM_OF_PAIRS_VALID; ++i)
+		validTotalEntropiaSorted[i] = validTotalEntropia[ind2[i]];
+	validTotalEntropia = validTotalEntropiaSorted;
+}
+
+// ВНИМАНИЕ! тут меняю количество документов в категории
+int recount_categs()
+{
+	for (int i = 0; i < NUM_OF_CATEGS; ++i)
+		if (categs[i].numofthecategory > 0)
+		{
+			categs[i].numofdocs = 0;
+			categs[i].docs.clear();
+		}
+	
+	double lastProcent = 0;
+	clock_t t0 = clock();
+	bool flagAlreadyPrintTime = false;	
+	
+	int j = 0;
+	set <int> watchedDocs;
+	int totalValid = 0;
+	while (j < NUM_OF_PAIRS_VALID)
+	{
+		int doc = validTotalEntropia[j].doc;
+		ROBOT_ASSERT(watchedDocs.find(doc) == watchedDocs.end());
+		watchedDocs.insert(doc);
+		for (auto it = docs[doc].categories.begin(); it != docs[doc].categories.end(); ++it)
+		{
+			ROBOT_ASSERT(categs[*it].numofthecategory >= 0);
+			categs[*it].numofdocs++;
+			categs[*it].docs.push_back(doc);
+		}
+		while (j < NUM_OF_PAIRS_VALID && validTotalEntropia[j].doc == doc)
+			++j;
+		++totalValid;
+		percent(lastProcent, (double)j / NUM_OF_PAIRS_VALID, t0, flagAlreadyPrintTime);
+	}
+	ROBOT_ASSERT(totalValid == NUM_OF_TEST_DOCS);	
+	
+	int NUM_OF_CATEGS_VALID = 0;
+	for (int i = 0; i < NUM_OF_CATEGS; ++i)
+	{
+		if (categs[i].numofdocs == 0)
+			categs[i].numofthecategory = -1000000000;
+		if (categs[i].numofthecategory > 0)
+			NUM_OF_CATEGS_VALID++;
+	}
+	cout << "new num of categs = " << NUM_OF_CATEGS_VALID << endl;
+	
+	
+	// отсортировала получившийся массив по категориям назад
+	valarray <int> ind(NUM_OF_PAIRS_VALID);
+	sort(validTotalEntropia, ind, CATEG_ENTR);  	
+	valarray <EntropiaPair> validTotalEntropiaSorted(NUM_OF_PAIRS_VALID);
+	for (int i = 0; i < NUM_OF_PAIRS_VALID; ++i)
+		validTotalEntropiaSorted[i] = validTotalEntropia[ind[i]];
+	validTotalEntropia = validTotalEntropiaSorted;
+	return NUM_OF_CATEGS_VALID;
+}
+
 
 int main()
 {
@@ -962,7 +1125,7 @@ int main()
 	readFileTotalEntropia(fin);
    // toc(3);
    // printAllTimers(1);
-	
+	cout << "file totalEntropia read" << endl;
 	for (int i = 0; i < NUM_OF_DOCS; ++i)
 	{
 		docs[i].numofthedoc = -1000000000;
@@ -981,11 +1144,19 @@ int main()
 	read_all_docs_without_catterms(finTrainFile);  
 	
 	
-	ofstream foutBestR;
-	//foutBestR.open("bestRforcategs.txt");
+	generateValidationDocs();
+	int NUM_OF_CATEGS_VALID = recount_categs();
+	
+	ofstream foutMistakes;
+	foutMistakes.open("mistakes0812.txt");
+	
+	ofstream foutBestRValid;
+	foutBestRValid.open("bestRforcategsValid.txt");
+	
+	bestRforCategs(validTotalEntropia, NUM_OF_CATEGS_VALID, foutBestRValid, foutMistakes);
 
 	//makePredictionForCateg(5e-5, 30, 30);
-	bestRforCategs(/*foutBestR*/);
+	//bestRforCategs(/*foutBestR*/);
 	
 	//finFreq.open("frequency(docs)");
 	
@@ -1005,8 +1176,7 @@ int main()
 	
 	//processEntropyFile();	
 	//testParameters();
-	//ofstream foutMistakes;
-	//foutMistakes.open("mistakesFind.txt");
+	
 	//findMistakes(20, foutMistakes);
 	
 	//readFreqFile(finFreq);
