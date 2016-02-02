@@ -170,7 +170,7 @@ valarray <Frequency> totalFrequency(REAL_NUM_OF_TERMS);
 vector <Document> docs(NUM_OF_DOCS + 1);
 vector <Category> categs(NUM_OF_CATEGS);
 vector <int> terms(NUM_OF_TERMS);
-map <int, list <int>> featDocs;
+map <int, vector <int>> featDocs;
 
 vector <int> truepos(NUM_OF_CATEGS);
 vector <int> falsepos(NUM_OF_CATEGS);
@@ -203,7 +203,7 @@ void percent(double& lastProcent, double newProcent, clock_t t0, bool& flagAlrea
 	}
 }
 
-void read_all_docs_without_catterms(ifstream & fin)
+void read_all_docs_without_catterms(ifstream & fin, bool featDocsActive = false)
 {
 	int k = 0;
 	fin.ignore(numeric_limits<streamsize>::max(), '\n');
@@ -232,7 +232,8 @@ void read_all_docs_without_catterms(ifstream & fin)
 			fin.get(ch);
 			fin >> value;
 			newdoc.terms[feat] = value;
-			featDocs[feat].push_back(k);
+			if (featDocsActive)
+				featDocs[feat].push_back(k);
 			fin.get(ch);
 			/*if (feat >= NUM_OF_TERMS - 1)
 				cout << feat << ": value = " << value << ", doc = " << k << endl;*/
@@ -734,6 +735,8 @@ bool compPairGreaterIntIntSecond (pair <int, int> a, pair <int, int> b)
 	return a.second > b.second; 
 }
 
+
+// перед использованием включить заполнение featDocs в read_all_docs_without_catterms
 void knnBenchmark(ifstream & fin) 
  {
 	//fread(&totalFrequency[0], sizeof(Frequency), REAL_NUM_OF_TERMS, fin);
@@ -987,26 +990,29 @@ valarray <EntropiaPair> generateValidationDocs(valarray <EntropiaPair> & curDocs
 	for (int i = 0; i < count; ++i)
 		resultValarraySorted[i] = resultValarray[ind2[i]];
 	resultValarray = resultValarraySorted;
-	return resultValarray;
+	cout << "generation finished" << endl;
+	return resultValarray;  
 }
 
 // ВНИМАНИЕ! тут меняю количество документов в категории - меняется массив categs
 
-// TODO: переделать (возможно)
+// массив должен быть отсортирован по документам
 int recount_categs(valarray <EntropiaPair> & validDocs)
 {
 	// сначала полностью очистили массив категорий
 	for (int i = 0; i < NUM_OF_CATEGS; ++i)
+	{
 		if (categs[i].numofthecategory > 0)
-		{
 			categs[i].numofdocs = 0;
-			categs[i].docs.clear();
-		}
+		categs[i].docs.clear();
+	}
 	
 	double lastProcent = 0;
 	clock_t t0 = clock();
 	bool flagAlreadyPrintTime = false;	
 	
+	
+	ROBOT_ASSERT(validDocs[0].doc <= validDocs[1].doc); 
 	int j = 0;
 	set <int> watchedDocs;
 	int totalValid = 0;
@@ -1014,7 +1020,7 @@ int recount_categs(valarray <EntropiaPair> & validDocs)
 	while (j < validDocs.size())
 	{
 		int doc = validDocs[j].doc;
-		ROBOT_ASSERT(watchedDocs.find(doc) == watchedDocs.end());
+		ROBOT_ASSERT(watchedDocs.find(doc) == watchedDocs.end()); // проверка на отсортированность по документам
 		watchedDocs.insert(doc);
 		for (auto it = docs[doc].categories.begin(); it != docs[doc].categories.end(); ++it)
 		{
@@ -1032,20 +1038,21 @@ int recount_categs(valarray <EntropiaPair> & validDocs)
 	int NUM_OF_CATEGS_VALID = 0;
 	for (int i = 0; i < NUM_OF_CATEGS; ++i)
 	{
-		if (categs[i].numofdocs == 0)
-			categs[i].numofthecategory = -1000000000;
-		if (categs[i].numofthecategory > 0)
+		/*if (categs[i].numofdocs == 0)
+			categs[i].numofthecategory = -1000000000;*/
+		if (categs[i].docs.size() > 0)
 			NUM_OF_CATEGS_VALID++;
 	}
 	cout << "new num of categs = " << NUM_OF_CATEGS_VALID << endl;
 	
-	// отсортировала получившийся массив по категориям назад
+	// отсортировала получившийся массив по категориям 
 	valarray <int> ind(validDocs.size());
 	sort(validDocs, ind, CATEG_ENTR);  	
 	valarray <EntropiaPair> validTotalEntropiaSorted(validDocs.size());
 	for (int i = 0; i < validDocs.size(); ++i)
 		validTotalEntropiaSorted[i] = validDocs[ind[i]];
 	validDocs = validTotalEntropiaSorted;
+	cout << "recount categs finished" << endl;
 	return NUM_OF_CATEGS_VALID;
 }
 
@@ -1074,37 +1081,32 @@ void checkFirstNCategs(valarray <EntropiaPair> entrArray, int n, ofstream & fout
 	}
 }
 
-void findBestMaF(valarray <EntropiaPair> & entrArray) 
+
+const int numOfExperiments = 1;
+
+void findBestMaF(valarray <EntropiaPair> & entrArray, ofstream & foutBestRForCateg) 
 {	
-	
-	int numOfExperiments = 10;
-	valarray <EntropiaPair> validEntropiaPairs(NUM_OF_PAIRS);
-	
-	double MaR[numOfExperiments][NUM_OF_CATEGS][MAX_POSSIBLE_BARRIER];  // буду проверять все возможные барьеры от 0 до min(categs.size(), MAX_POSSIBLE_BARRIER)
+	vector < vector < vector <double>>> MaR (NUM_OF_CATEGS, vector <vector <double>> (MAX_POSSIBLE_BARRIER, vector <double> (numOfExperiments, 0)));  // буду проверять все возможные барьеры от 0 до min(categs.size(), MAX_POSSIBLE_BARRIER)
 	// вообще говоря, максимальный размер категории - 387168, но таких мало. MAX_POSSIBLE_BARRIER установлен в значение 1000.
-	double MaP[numOfExperiments][NUM_OF_CATEGS][MAX_POSSIBLE_BARRIER]; 
-	
-	// изначально обнулили массив
-	for (int i = 0; i < numOfExperiments; ++i)
-		for (int j = 0; j < NUM_OF_CATEGS; ++j)
-			for (int k = 0; k < MAX_POSSIBLE_BARRIER; ++k)
-			{
-				MaR[i][j][k] = 0;
-				MaP[i][j][k] = 0;
-			}
-			
+	vector < vector < vector <double>>> MaP (NUM_OF_CATEGS, vector <vector <double>> (MAX_POSSIBLE_BARRIER, vector <double> (numOfExperiments, 0)));
+	cout << "succesfully allocated" << endl;
+
+//#pragma omp parallel for
 	for (int i = 0; i < numOfExperiments; ++i)
 	{
 		double lastProcent = 0;
 		clock_t t0 = clock();
 		bool flagAlreadyPrintTime = false;
+		valarray <EntropiaPair> validEntropiaPairs(NUM_OF_PAIRS);
 		validEntropiaPairs = generateValidationDocs(entrArray);  // на основе массива entrArray генерирую случайное множество
-		recount_categs(validEntropiaPairs); // изменили состав категорий, нужно вернуть их обратно в конце.
+		int cur_valid_categs = recount_categs(validEntropiaPairs); 
 		int j = 0;
 		set <int> watchedCategs;
 	    while (j < validEntropiaPairs.size())
 		{
-			int categ = validEntropiaPairs[j].categ;   
+			while (categs[validEntropiaPairs[j].categ].numofdocs == 0)  //пропускаем предсказания для тех категорий, которые не попали в тестовое
+				++j;
+			int categ = validEntropiaPairs[j].categ;
 			ROBOT_ASSERT(watchedCategs.find(categ) == watchedCategs.end()); // проверка на просмотренность категории
 			watchedCategs.insert(categ);
 			int cur_max_barrier = min(categs[categ].numofdocs, MAX_POSSIBLE_BARRIER);
@@ -1113,25 +1115,50 @@ void findBestMaF(valarray <EntropiaPair> & entrArray)
 			while (j < validEntropiaPairs.size() && validEntropiaPairs[j].categ == categ)
 			{
 				int predDoc = validEntropiaPairs[j].doc;
-				if (docs[predDoc].categories.find(categ) != docs[predDoc].categories.end())
+				if (find(categs[categ].docs.begin(), categs[categ].docs.end(), predDoc) != categs[categ].docs.end())
 					tp++;  // считаю только правильно предсказанные
 				++count;
 				++j;
 				if (tp != 0)
 				{
-					MaP[i][categ][count] = (double)tp / count;
-					MaR[i][categ][count] = (double)tp / categs[categ].numofdocs;
+					MaP[categ][count][i] = (double)tp / count;
+					MaR[categ][count][i] = (double)tp / categs[categ].numofdocs;
 				}	
 			
 			} 
 			if (j < validEntropiaPairs.size())
 				ROBOT_ASSERT(categ < validEntropiaPairs[j].categ)  
-			percent(lastProcent, (double)j / numOfExperiments, t0, flagAlreadyPrintTime);
+			//percent(lastProcent, (double)j / cur_valid_categs, t0, flagAlreadyPrintTime);
 		}
-		
-		// TODO: сделать обратно состав категории - подумать, как сделать это хорошо и надо ли?
+		cout << "experiment " << i << " finished" << endl;
 	}
+	
+	for (int j = 0; j < NUM_OF_CATEGS; ++j)
+	{
+		double maxMaf = 0;
+		int indMaxMaf = -1;
+		for (int k = 0; k < MAX_POSSIBLE_BARRIER; ++k)
+		{
+			double meanMaP = 0, meanMaR = 0;
+			for (int i = 0; i < numOfExperiments; ++i)
+			{
+				meanMaP += MaP[j][k][i];
+				meanMaR += MaR[j][k][i];
+			}
+			meanMaP /= numOfExperiments;
+			meanMaR /= numOfExperiments;
+			double curMaf = 2 * meanMaP * meanMaR / (meanMaP + meanMaR);
+			if (curMaf > maxMaf)
+			{
+				maxMaf = curMaf;
+				indMaxMaf = k;
+			}
+		}
+		foutBestRForCateg << j << " " << maxMaf << " " << indMaxMaf << endl;	
+	}
+	cout << "function finished" << endl;
 }
+
 
 
 
@@ -1161,8 +1188,10 @@ int main()
 	finTrainFile.open("train.csv");
 	read_all_docs_without_catterms(finTrainFile);  
 	
-	
-	findBestMaF(totalEntropia);
+	ofstream foutBestRForCateg;
+	foutBestRForCateg.open("bestRForCateg.txt");
+	findBestMaF(totalEntropia, foutBestRForCateg);
+	cout << " after function" << endl;
 	
 	
 	//generateValidationDocs(totalEntropia);
