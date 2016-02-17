@@ -1081,13 +1081,13 @@ void checkFirstNCategs(valarray <EntropiaPair> entrArray, int n, ofstream & fout
 }
 
 
-const int numOfExperiments = 100;
+const int numOfExperiments = 25;  // 25 - ok
 
 void findBestMaF(valarray <EntropiaPair> & entrArray, ofstream & foutBestRForCateg) 
 {	
-	vector < vector < vector <double>>> MaR (NUM_OF_CATEGS, vector <vector <double>> (MAX_POSSIBLE_BARRIER + 1, vector <double> (numOfExperiments, 0)));  // буду проверять все возможные барьеры от 0 до min(categs.size(), MAX_POSSIBLE_BARRIER)
+	vector < vector < vector <double>>> MaR (NUM_OF_CATEGS, vector <vector <double>> (MAX_POSSIBLE_BARRIER + 1, vector <double> (numOfExperiments, -1)));  // буду проверять все возможные барьеры от 0 до min(categs.size(), MAX_POSSIBLE_BARRIER)
 	// вообще говоря, максимальный размер категории - 387168, но таких мало. MAX_POSSIBLE_BARRIER установлен в значение 1000.
-	vector < vector < vector <double>>> MaP (NUM_OF_CATEGS, vector <vector <double>> (MAX_POSSIBLE_BARRIER + 1, vector <double> (numOfExperiments, 0)));
+	vector < vector < vector <double>>> MaP (NUM_OF_CATEGS, vector <vector <double>> (MAX_POSSIBLE_BARRIER + 1, vector <double> (numOfExperiments, -1)));
 	cout << "succesfully allocated" << endl;
 
 //#pragma omp parallel for
@@ -1125,7 +1125,12 @@ void findBestMaF(valarray <EntropiaPair> & entrArray, ofstream & foutBestRForCat
 				{
 					MaP[categ][count][i] = (double)tp / count;
 					MaR[categ][count][i] = (double)tp / categs[categ].numofdocs;
-				}	
+				}
+				else
+				{
+					MaP[categ][count][i] = 0;
+					MaR[categ][count][i] = 0;
+				}
 			
 			} 
 			while (j < validEntropiaPairs.size() && validEntropiaPairs[j].categ == categ)
@@ -1138,20 +1143,32 @@ void findBestMaF(valarray <EntropiaPair> & entrArray, ofstream & foutBestRForCat
 		cout << "experiment " << i << " finished" << endl;
 	}
 	
+	double commonMaF = 0;
+	
 	for (int j = 0; j < NUM_OF_CATEGS; ++j)
 	{
 		double maxMaf = 0;
 		int indMaxMaf = -1000000000;
+		//double maxMaP = 0, maxMaR = 0;
 		for (int k = 0; k < MAX_POSSIBLE_BARRIER; ++k)
 		{
 			double meanMaP = 0, meanMaR = 0;
+			int happenedExperiments = 0;
 			for (int i = 0; i < numOfExperiments; ++i)
 			{
-				meanMaP += MaP[j][k][i];
-				meanMaR += MaR[j][k][i];
+				if (MaP[j][k][i] != -1)
+				{
+					ROBOT_ASSERT(MaR[j][k][i] != -1)
+					meanMaP += MaP[j][k][i];
+					meanMaR += MaR[j][k][i];
+					++happenedExperiments;
+				}
 			}
-			meanMaP /= numOfExperiments;
-			meanMaR /= numOfExperiments;
+			if (happenedExperiments != 0)
+			{				
+				meanMaP /= happenedExperiments;
+				meanMaR /= happenedExperiments;
+			}
 			double curMaf = 2 * meanMaP * meanMaR / (meanMaP + meanMaR);
 			if (curMaf > maxMaf)
 			{
@@ -1160,6 +1177,11 @@ void findBestMaF(valarray <EntropiaPair> & entrArray, ofstream & foutBestRForCat
 			}
 		}
 		foutBestRForCateg << j  << " " << indMaxMaf << endl;
+	}
+	
+	for (int j = 0; j < NUM_OF_CATEGS; ++j)
+	{
+		
 	}
 	cout << "function finished" << endl;
 }
@@ -1194,7 +1216,7 @@ int main()
 	read_all_docs_without_catterms(finTrainFile);  
 	
 	ofstream foutBestRForCateg;
-	foutBestRForCateg.open("bestRForCategExperiments.txt");
+	foutBestRForCateg.open("bestRForCategExperiments17021016.txt");
 	findBestMaF(totalEntropia, foutBestRForCateg);
 	
 	
