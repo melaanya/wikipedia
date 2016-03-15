@@ -1061,6 +1061,9 @@ void categInfo(valarray <EntropiaPair> & entrArray, ofstream & foutCategs)
 {
 	int count = 0;
 	int j = 0;
+	double lastProcent = 0;
+	clock_t t0 = clock();	
+	bool flagAlreadyPrintTime = false;	
 	while (j < entrArray.size())
 	{
 		int categ = entrArray[j].categ;
@@ -1074,6 +1077,7 @@ void categInfo(valarray <EntropiaPair> & entrArray, ofstream & foutCategs)
 				foutCategs << 0 << " ";
 			++j;
 		}
+		percent(lastProcent, (double)j / NUM_OF_PAIRS, t0, flagAlreadyPrintTime);
 		foutCategs << endl;
 		++count;
 	}
@@ -1244,10 +1248,9 @@ int main()
 	finTrainFile.open("train.csv");
 	read_all_docs_without_catterms(finTrainFile);  
 	
-	categInfo(totalEntropia);
-	
-	ofstream foutBestRForCateg;
-	foutBestRForCateg.open("bestRForCategExperiments17021016-2.txt");
+	ofstream foutCategInfo;
+	foutCategInfo.open("categInfo.txt");
+	categInfo(totalEntropia, foutCategInfo);
 	
 	/*ofstream foutBestRForCateg;
 	foutBestRForCateg.open("bestRForCategExperiments17021016-2.txt");
