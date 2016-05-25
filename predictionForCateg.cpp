@@ -998,6 +998,7 @@ valarray <EntropiaPair> generateValidationDocs(valarray <EntropiaPair> & curDocs
 
 // массив должен быть отсортирован по документам
 // затрагивается только массив categs, массив docs остается без изменений (как для полной выборки)
+// на выходе массив отсортирован по категориям
 int recount_categs(valarray <EntropiaPair> & validDocs)
 {
 	// сначала полностью очистили массив категорий
@@ -1067,7 +1068,8 @@ void categInfo(valarray <EntropiaPair> & entrArray, ofstream & foutCategs)
 	while (j < entrArray.size())
 	{
 		int categ = entrArray[j].categ;
-		foutCategs << categs[categ].numofdocs << " ";
+		foutCategs << categ << " " << categs[categ].numofdocs << " ";
+		string entrStr = to_string(categs[categ].numofdocs) + " ";
 		while (j < entrArray.size() && entrArray[j].categ == categ)
 		{
 			int predDoc = entrArray[j].doc;
@@ -1076,15 +1078,65 @@ void categInfo(valarray <EntropiaPair> & entrArray, ofstream & foutCategs)
 			else 
 				foutCategs << 0 << " ";
 			++j;
+			// добавление в файл информации об энтропии отсортированных документов
+			entrStr += to_string(entrArray[j].entropia) + " ";  
 		}
+		foutCategs << endl << entrStr << endl;
 		percent(lastProcent, (double)j / NUM_OF_PAIRS, t0, flagAlreadyPrintTime);
-		foutCategs << endl;
 		++count;
 	}
 }
 
+const int numOfExperiments = 250;  // 25 - possible size allocated
 
-const int numOfExperiments = 25;  // 25 - possible size allocated
+
+void manyCategsInfo(valarray <EntropiaPair> & entrArray, ofstream & foutCategs)
+{
+	// делаю для первых 10000 категорий - остальные не рассматриваю
+	// сначала сделаю вывод вразброс - потом попробую со строками
+	int fixedNumCategs = 10000;
+	multimap <int, string> results;
+	for (int i = 0; i < numOfExperiments; ++i) 
+	{
+		valarray <EntropiaPair> curDocs = generateValidationDocs(entrArray); // массив пришел отсортированный по категориям
+		int validCategs = recount_categs(curDocs);  // в этот момент изменилось число документов в массиве categs и содержание
+		int j = 0;
+		int count = 0;
+		double lastProcent = 0;
+		clock_t t0 = clock();	
+		bool flagAlreadyPrintTime = false;	
+		double curNumPairs = (double)curDocs.size() / sizeof(EntropiaPair);
+		while (j < curDocs.size() && count < fixedNumCategs)
+		{
+			int categ = curDocs[j].categ;
+			string categInfo = " " + to_string(categs[categ].numofdocs) + " ";
+			//foutCategs << categ << " " << categs[categ].numofdocs << " ";
+			while (j < curDocs.size() && curDocs[j].categ == categ)
+			{
+				int predDoc = curDocs[j].doc;
+				if (find(categs[categ].docs.begin(), categs[categ].docs.end(), predDoc) != categs[categ].docs.end())
+					//foutCategs << 1 << " ";
+					categInfo += to_string(1) + " ";
+				else 
+					//foutCategs << 0 << " ";
+					categInfo += to_string(0) + " ";
+				++j;
+			}
+			percent(lastProcent, (double)j / curNumPairs, t0, flagAlreadyPrintTime);
+			//foutCategs << endl;
+			categInfo += "\n";
+			results.insert(pair <int, string> (categ, categInfo));
+			++count;
+		}
+	}
+	for (auto it = results.begin(); it != results.end(); ++it) 
+	{
+		foutCategs << it->first << it->second;
+	}
+	
+}
+
+
 
 void findBestMaF(valarray <EntropiaPair> & entrArray, ofstream & foutBestRForCateg) 
 {	
@@ -1222,6 +1274,8 @@ void findBestMaF(valarray <EntropiaPair> & entrArray, ofstream & foutBestRForCat
 
 
 
+
+
 int main()
 {
 	srand(1);
@@ -1249,8 +1303,11 @@ int main()
 	read_all_docs_without_catterms(finTrainFile);  
 	
 	ofstream foutCategInfo;
-	foutCategInfo.open("categInfo.txt");
+	foutCategInfo.open("categInfoPlusEntropia.txt");
 	categInfo(totalEntropia, foutCategInfo);
+	
+	/*foutCategInfo.open("manyCategsInfo.txt");
+	manyCategsInfo(totalEntropia, foutCategInfo);*/
 	
 	/*ofstream foutBestRForCateg;
 	foutBestRForCateg.open("bestRForCategExperiments17021016-2.txt");
